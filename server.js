@@ -16,8 +16,10 @@ const corsOptions = {
         if (!origin) return callback(null, true);
         
         const allowedOrigins = [
-            'https://www.kyroshield.com',      // Your GoDaddy domain (with www)
-            'https://kyroshield.com',          // Your GoDaddy domain (without www)
+            'https://www.kyroshield.com',      // Your main domain (with www)
+            'https://kyroshield.com',          // Your main domain (without www)
+            'http://08a.cef.mytemp.website',   // GoDaddy temporary URL ← ADD THIS
+            'https://08a.cef.mytemp.website',  // HTTPS version ← ADD THIS
             'http://localhost:5500',           // Live Server default port
             'http://127.0.0.1:5500',           // Live Server alternative
             'http://localhost:5501',           // Your settings.json port
