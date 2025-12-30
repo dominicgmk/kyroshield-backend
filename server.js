@@ -16,11 +16,15 @@ const corsOptions = {
         if (!origin) return callback(null, true);
         
         const allowedOrigins = [
-            'https://www.kyroshield.com',      // Your GoDaddy domain
-            'https://kyroshield.com',          // Without www
-            'http://localhost:5501',           // For local testing
-            'http://127.0.0.1:5501'            // For local testing
-        ];
+            'https://www.kyroshield.com',      // Your GoDaddy domain (with www)
+            'https://kyroshield.com',          // Your GoDaddy domain (without www)
+            'http://localhost:5500',           // Live Server default port
+            'http://127.0.0.1:5500',           // Live Server alternative
+            'http://localhost:5501',           // Your settings.json port
+            'http://127.0.0.1:5501',           // Alternative
+            'http://localhost:3000',           // For testing backend directly
+            process.env.NODE_ENV === 'development' && origin  // Allow all in dev
+        ].filter(Boolean); // Remove false values
         
         if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
             return callback(null, true);
@@ -394,6 +398,9 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📧 Email service ready`);
-    console.log(`🌐 Health check: http://localhost:${PORT}/api/health`);
-    console.log(`📝 Quote endpoint: POST http://localhost:${PORT}/api/send-email`);
+    
+    // Use Railway URL if available, otherwise localhost
+    const railwayUrl = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
+    console.log(`🌐 Health check: ${railwayUrl}/api/health`);
+    console.log(`📝 Quote endpoint: POST ${railwayUrl}/api/send-email`);
 });
