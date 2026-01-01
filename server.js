@@ -16,19 +16,20 @@ const corsOptions = {
         if (!origin) return callback(null, true);
         
         const allowedOrigins = [
-            'https://www.kyroshield.com',      // Your main domain (with www)
-            'https://kyroshield.com',          // Your main domain (without www)
-            'http://08a.cef.mytemp.website',   // GoDaddy temporary URL ← ADD THIS
-            'https://08a.cef.mytemp.website',  // HTTPS version ← ADD THIS
-            'http://localhost:5500',           // Live Server default port
-            'http://127.0.0.1:5500',           // Live Server alternative
-            'http://localhost:5501',           // Your settings.json port
-            'http://127.0.0.1:5501',           // Alternative
-            'http://localhost:3000',           // For testing backend directly
-            process.env.NODE_ENV === 'development' && origin  // Allow all in dev
-        ].filter(Boolean); // Remove false values
+            'https://www.kyroshield.com',
+            'https://kyroshield.com',
+            'http://localhost:5501',
+            'http://127.0.0.1:5501',
+            'https://kyroshield-backend.up.railway.app'
+        ];
         
-        if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+        // Allow all origins in development
+        if (process.env.NODE_ENV === 'development') {
+            return callback(null, true);
+        }
+        
+        // Check if origin is in allowed list
+        if (allowedOrigins.includes(origin)) {
             return callback(null, true);
         } else {
             console.log('CORS blocked origin:', origin);
@@ -37,8 +38,9 @@ const corsOptions = {
         }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    exposedHeaders: ['Content-Length', 'X-Request-Id']
 };
 
 app.use(cors(corsOptions));
