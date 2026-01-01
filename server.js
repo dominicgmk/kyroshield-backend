@@ -9,11 +9,30 @@ dotenv.config();
 
 const app = express();
 
-// CORS Configuration for Production
+// Add request logging middleware FIRST
+app.use((req, res, next) => {
+    console.log('\n=== NEW REQUEST ===');
+    console.log(`Time: ${new Date().toISOString()}`);
+    console.log(`Method: ${req.method}`);
+    console.log(`Path: ${req.path}`);
+    console.log(`Origin Header: ${req.headers.origin || 'No origin header'}`);
+    console.log(`Referer: ${req.headers.referer || 'No referer'}`);
+    next();
+});
+
+// CORS Configuration - FIXED VERSION
 const corsOptions = {
     origin: function(origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
+        // Allow requests with no origin (like mobile apps, curl, or same-origin requests)
+        if (!origin) {
+            console.log('📡 No origin header - allowing request');
+            return callback(null, true);
+        }
+        
+        console.log('🔍 Checking CORS for origin:', origin);
+        
+        // Normalize origin by removing trailing slash
+        const normalizedOrigin = origin.replace(/\/$/, '').toLowerCase();
         
         const allowedOrigins = [
             'https://www.kyroshield.com',
@@ -21,30 +40,63 @@ const corsOptions = {
             'http://localhost:5501',
             'http://127.0.0.1:5501',
             'https://kyroshield-backend.up.railway.app'
-        ];
+        ].map(url => url.replace(/\/$/, '').toLowerCase());
+        
+        console.log('📋 Allowed origins (normalized):', allowedOrigins);
         
         // Allow all origins in development
         if (process.env.NODE_ENV === 'development') {
+            console.log('⚙️ Development mode - allowing all origins');
             return callback(null, true);
         }
         
-        // Check if origin is in allowed list
-        if (allowedOrigins.includes(origin)) {
+        // Check exact match
+        if (allowedOrigins.includes(normalizedOrigin)) {
+            console.log('✅ CORS allowed - exact match');
             return callback(null, true);
-        } else {
-            console.log('CORS blocked origin:', origin);
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
         }
+        
+        // Check for variations (www vs non-www)
+        if (normalizedOrigin === 'https://www.kyroshield.com' || 
+            normalizedOrigin === 'https://kyroshield.com') {
+            console.log('✅ CORS allowed - kyroshield.com variation');
+            return callback(null, true);
+        }
+        
+        // Check for localhost variations
+        if (normalizedOrigin.includes('localhost:5501') || 
+            normalizedOrigin.includes('127.0.0.1:5501')) {
+            console.log('✅ CORS allowed - localhost variation');
+            return callback(null, true);
+        }
+        
+        // Check for railway variations
+        if (normalizedOrigin.includes('railway.app')) {
+            console.log('✅ CORS allowed - railway.app domain');
+            return callback(null, true);
+        }
+        
+        console.log('❌ CORS blocked - origin not in allowed list:', normalizedOrigin);
+        // Return false instead of throwing an error
+        return callback(null, false);
     },
     credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    exposedHeaders: ['Content-Length', 'X-Request-Id']
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 86400 // 24 hours for preflight cache
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options('*', cors(corsOptions)); // Handle pre-flight for all routes
+
+// Add response headers middleware
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    next();
+});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -59,6 +111,10 @@ const limiter = rateLimit({
     },
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req) => {
+        // Skip rate limiting for OPTIONS requests (pre-flight)
+        return req.method === 'OPTIONS';
+    }
 });
 
 app.use('/api/send-email', limiter);
@@ -90,7 +146,7 @@ const createTransporter = () => {
     }
 };
 
-// Health check endpoint
+// Health check endpoint with CORS headers
 app.get('/api/health', (req, res) => {
     const transporter = createTransporter();
     const emailConfigOk = transporter !== null;
@@ -103,7 +159,22 @@ app.get('/api/health', (req, res) => {
         email: {
             configured: emailConfigOk,
             host: process.env.EMAIL_HOST ? 'Configured' : 'Not configured'
+        },
+        cors: {
+            originReceived: req.headers.origin || 'No origin header',
+            allowed: true
         }
+    });
+});
+
+// CORS test endpoint
+app.get('/api/cors-test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'CORS test endpoint',
+        origin: req.headers.origin || 'No origin header',
+        method: req.method,
+        timestamp: new Date().toISOString()
     });
 });
 
@@ -379,9 +450,21 @@ app.post('/api/send-email', async (req, res) => {
     }
 });
 
-// Error handling middleware
+// Updated error handling middleware
 app.use((err, req, res, next) => {
-    console.error(err.stack);
+    console.error('Global error handler:', err.message);
+    console.error('Error stack:', err.stack);
+    
+    // Check if it's a CORS error
+    if (err.message && (err.message.includes('CORS') || err.message.includes('origin'))) {
+        return res.status(403).json({
+            success: false,
+            message: 'CORS Error: The request was blocked due to CORS policy.',
+            error: 'CORS_POLICY_VIOLATION',
+            details: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
+    
     res.status(500).json({
         success: false,
         message: 'Something went wrong!',
@@ -391,6 +474,7 @@ app.use((err, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
+    console.log(`404 Not Found: ${req.method} ${req.url}`);
     res.status(404).json({
         success: false,
         message: 'Endpoint not found'
@@ -400,11 +484,17 @@ app.use((req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
+    console.log(`\n========================================`);
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📧 Email service ready`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`========================================\n`);
     
     // Use Railway URL if available, otherwise localhost
     const railwayUrl = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
-    console.log(`🌐 Health check: ${railwayUrl}/api/health`);
-    console.log(`📝 Quote endpoint: POST ${railwayUrl}/api/send-email`);
+    console.log(`🔗 Important Endpoints:`);
+    console.log(`   Health Check: ${railwayUrl}/api/health`);
+    console.log(`   CORS Test: ${railwayUrl}/api/cors-test`);
+    console.log(`   Quote endpoint: POST ${railwayUrl}/api/send-email`);
+    console.log(`   Test email: POST ${railwayUrl}/api/test-email\n`);
 });
