@@ -9,6 +9,9 @@ dotenv.config();
 
 const app = express();
 
+// Trust Railway's proxy for rate limiting
+app.set('trust proxy', 1);
+
 // Add request logging middleware FIRST
 app.use((req, res, next) => {
     console.log('\n=== NEW REQUEST ===');
@@ -78,9 +81,6 @@ const corsOptions = {
             return callback(null, true);
         }
         
-        // console.log('❌ CORS blocked - origin not in allowed list:', normalizedOrigin);
-        // // Return false instead of throwing an error
-        // return callback(null, false);
         console.log('❌ CORS blocked - origin not in allowed list:', normalizedOrigin);
         // TEMPORARY: Allow all origins for testing
         return callback(null, true);
@@ -93,15 +93,6 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // Handle pre-flight for all routes
-
-// Add response headers middleware
-// app.use((req, res, next) => {
-//     res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-//     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-//     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-//     res.header('Access-Control-Allow-Credentials', 'true');
-//     next();
-// });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -131,6 +122,12 @@ const createTransporter = () => {
             throw new Error('Missing email configuration. Check your .env file.');
         }
 
+        console.log('📧 Creating email transporter:', {
+            host: process.env.EMAIL_HOST,
+            port: process.env.EMAIL_PORT,
+            secure: process.env.EMAIL_SECURE
+        });
+
         const transporter = nodemailer.createTransport({
             host: process.env.EMAIL_HOST,
             port: parseInt(process.env.EMAIL_PORT) || 587,
@@ -141,7 +138,13 @@ const createTransporter = () => {
             },
             tls: {
                 rejectUnauthorized: false
-            }
+            },
+            // Add timeout settings to prevent connection timeouts
+            connectionTimeout: 10000, // 10 seconds
+            greetingTimeout: 10000,   // 10 seconds
+            socketTimeout: 10000,     // 10 seconds
+            debug: true,  // Enable debug logging
+            logger: true  // Enable logger
         });
 
         return transporter;
@@ -178,6 +181,45 @@ app.get('/api/health', (req, res) => {
     
     console.log('🏥 Health check requested:', healthData.request);
     res.json(healthData);
+});
+
+// SMTP test endpoint
+app.get('/api/test-smtp', async (req, res) => {
+    try {
+        console.log('🔧 Testing SMTP connection...');
+        
+        const transporter = createTransporter();
+        
+        if (!transporter) {
+            return res.status(500).json({
+                success: false,
+                message: 'Transporter not created. Check email configuration.'
+            });
+        }
+        
+        await transporter.verify();
+        
+        console.log('✅ SMTP connection verified');
+        
+        res.json({
+            success: true,
+            message: 'SMTP connection successful',
+            config: {
+                host: process.env.EMAIL_HOST,
+                port: process.env.EMAIL_PORT,
+                secure: process.env.EMAIL_SECURE,
+                user: process.env.EMAIL_USER ? 'Configured' : 'Not configured'
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ SMTP test error:', error);
+        res.status(500).json({
+            success: false,
+            message: `SMTP connection failed: ${error.message}`,
+            code: error.code
+        });
+    }
 });
 
 // CORS test endpoint
@@ -238,13 +280,16 @@ app.post('/api/test-email', async (req, res) => {
         
         if (error.code === 'EAUTH') {
             errorMessage += 'Authentication failed. Check your email credentials in Railway variables.';
+        } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNECTION') {
+            errorMessage += 'Connection timeout. Check your SMTP settings.';
         } else {
             errorMessage += error.message;
         }
 
         res.status(500).json({
             success: false,
-            message: errorMessage
+            message: errorMessage,
+            errorCode: error.code
         });
     }
 });
@@ -454,11 +499,14 @@ app.post('/api/send-email', async (req, res) => {
         
         if (error.code === 'EAUTH') {
             errorMessage = 'Email authentication failed. Please check your email configuration.';
+        } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNECTION') {
+            errorMessage = 'Email connection failed. Please check your SMTP settings or try again later.';
         }
 
         res.status(500).json({
             success: false,
-            message: errorMessage
+            message: errorMessage,
+            errorCode: error.code
         });
     }
 });
@@ -507,6 +555,7 @@ app.listen(PORT, () => {
     const railwayUrl = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
     console.log(`🔗 Important Endpoints:`);
     console.log(`   Health Check: ${railwayUrl}/api/health`);
+    console.log(`   SMTP Test: ${railwayUrl}/api/test-smtp`);
     console.log(`   CORS Test: ${railwayUrl}/api/cors-test`);
     console.log(`   Quote endpoint: POST ${railwayUrl}/api/send-email`);
     console.log(`   Test email: POST ${railwayUrl}/api/test-email\n`);
