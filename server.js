@@ -39,7 +39,9 @@ const corsOptions = {
             'https://kyroshield.com',
             'http://localhost:5501',
             'http://127.0.0.1:5501',
-            'https://kyroshield-backend.up.railway.app'
+            'https://kyroshield-backend.up.railway.app',
+            'https://cloudflare.com',  // Add Cloudflare
+            'https://www.cloudflare.com'  // Add Cloudflare www
         ].map(url => url.replace(/\/$/, '').toLowerCase());
         
         console.log('📋 Allowed origins (normalized):', allowedOrigins);
@@ -76,9 +78,12 @@ const corsOptions = {
             return callback(null, true);
         }
         
+        // console.log('❌ CORS blocked - origin not in allowed list:', normalizedOrigin);
+        // // Return false instead of throwing an error
+        // return callback(null, false);
         console.log('❌ CORS blocked - origin not in allowed list:', normalizedOrigin);
-        // Return false instead of throwing an error
-        return callback(null, false);
+        // TEMPORARY: Allow all origins for testing
+        return callback(null, true);
     },
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
@@ -90,13 +95,13 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // Handle pre-flight for all routes
 
 // Add response headers middleware
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    next();
-});
+// app.use((req, res, next) => {
+//     res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+//     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+//     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+//     res.header('Access-Control-Allow-Credentials', 'true');
+//     next();
+// });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -151,20 +156,28 @@ app.get('/api/health', (req, res) => {
     const transporter = createTransporter();
     const emailConfigOk = transporter !== null;
     
-    res.json({
+    const healthData = {
         success: true,
         message: 'Kyroshield Backend Server',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development',
+        nodeVersion: process.version,
+        uptime: process.uptime(),
         email: {
             configured: emailConfigOk,
-            host: process.env.EMAIL_HOST ? 'Configured' : 'Not configured'
+            host: process.env.EMAIL_HOST || 'Not configured',
+            user: process.env.EMAIL_USER ? 'Configured' : 'Not configured'
         },
-        cors: {
-            originReceived: req.headers.origin || 'No origin header',
-            allowed: true
+        request: {
+            origin: req.headers.origin || 'No origin header',
+            ip: req.ip,
+            method: req.method,
+            url: req.url
         }
-    });
+    };
+    
+    console.log('🏥 Health check requested:', healthData.request);
+    res.json(healthData);
 });
 
 // CORS test endpoint
