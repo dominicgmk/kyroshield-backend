@@ -32,19 +32,6 @@ app.use((req, res, next) => {
     console.log(`Origin: ${req.headers.origin || 'No origin'}`);
     console.log(`User-Agent: ${req.headers['user-agent']?.substring(0, 80) || 'Unknown'}`);
     
-    // Log response time
-    res.on('finish', () => {
-        const duration = Date.now() - req.startTime;
-        res.setHeader('X-Response-Time', `${duration}ms`);
-        
-        console.log(`✅ Request ${requestId} completed in ${duration}ms`);
-        
-        // Log slow requests
-        if (duration > 1000) {
-            console.warn(`🐌 Slow request: ${req.method} ${req.path} took ${duration}ms`);
-        }
-    });
-    
     next();
 });
 
@@ -138,6 +125,32 @@ app.use((req, res, next) => {
             requestId: req.requestId
         });
     }
+    next();
+});
+
+// Response timing middleware - FIXED VERSION
+app.use((req, res, next) => {
+    const start = Date.now();
+    
+    // Store original end method
+    const originalEnd = res.end;
+    
+    res.end = function(...args) {
+        const duration = Date.now() - start;
+        res.setHeader('X-Response-Time', `${duration}ms`);
+        
+        // Log completion
+        console.log(`✅ Request ${req.requestId} completed in ${duration}ms`);
+        
+        // Log slow requests
+        if (duration > 1000) {
+            console.warn(`🐌 Slow request: ${req.method} ${req.path} took ${duration}ms`);
+        }
+        
+        // Call original end method
+        return originalEnd.apply(res, args);
+    };
+    
     next();
 });
 
@@ -415,7 +428,7 @@ app.post('/api/test-email', ipLimiter, async (req, res) => {
     }
 });
 
-// Email sending endpoint (for quote form)
+// Email sending endpoint (for quote form) - KEEP YOUR ORIGINAL EMAIL TEMPLATES
 app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
     try {
         // Sanitize ALL inputs
@@ -896,8 +909,7 @@ app.use((err, req, res, next) => {
         path: req.path,
         ip: req.ip,
         error: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-        body: req.body
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
     
     const isProduction = process.env.NODE_ENV === 'production';
