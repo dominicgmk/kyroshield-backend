@@ -322,132 +322,359 @@ app.post('/api/send-email', async (req, res) => {
 
         // Admin email HTML
         const adminHtml = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                    .header { background-color: #000; color: white; padding: 20px; text-align: center; }
-                    .content { background-color: #f9f9f9; padding: 30px; border-radius: 8px; }
-                    .field { margin-bottom: 15px; }
-                    .label { font-weight: bold; color: #000; }
-                    .value { color: #666; }
-                    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #777; font-size: 12px; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h2>📋 New Quote Request</h2>
-                        <p>Kyroshield Website Form Submission</p>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background-color: #000; color: white; padding: 30px 20px; text-align: center; }
+                .text-logo { 
+                    font-family: 'Montserrat', Arial, sans-serif; 
+                    font-size: 36px; 
+                    font-weight: bold; 
+                    color: white; 
+                    margin-bottom: 10px; 
+                    letter-spacing: 1px; 
+                }
+                .logo-accent { color: #999; }
+                .tagline { color: #ccc; font-size: 14px; letter-spacing: 1px; margin: 0; }
+                .content { background-color: #f9f9f9; padding: 30px; border-radius: 8px; }
+                .field { margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
+                .label { font-weight: bold; color: #000; margin-bottom: 5px; }
+                .value { color: #666; line-height: 1.4; }
+                .message-box { background-color: #fff8e1; padding: 20px; border-radius: 4px; margin: 20px 0; }
+                .action-buttons { margin-top: 25px; text-align: center; }
+                .btn { display: inline-block; padding: 12px 24px; margin: 0 10px; background-color: #000; color: white; text-decoration: none; border-radius: 4px; }
+                .btn:hover { background-color: #333; }
+                .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #777; font-size: 12px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="text-logo">KYRO<span class="logo-accent">SHIELD</span></div>
+                    <p class="tagline">Secure. Comply. Evolve.</p>
+                    <h2 style="margin: 20px 0 0 0; font-size: 20px;">📋 New Quote Request</h2>
+                </div>
+                <div class="content">
+                    <div class="field">
+                        <div class="label">Full Name:</div>
+                        <div class="value">${name}</div>
                     </div>
-                    <div class="content">
-                        <div class="field">
-                            <div class="label">Full Name:</div>
-                            <div class="value">${name}</div>
-                        </div>
-                        <div class="field">
-                            <div class="label">Company:</div>
-                            <div class="value">${company}</div>
-                        </div>
-                        <div class="field">
-                            <div class="label">Email:</div>
-                            <div class="value">${email}</div>
-                        </div>
-                        <div class="field">
-                            <div class="label">Phone:</div>
-                            <div class="value">${phone}</div>
-                        </div>
-                        <div class="field">
-                            <div class="label">Service Interested In:</div>
-                            <div class="value">${serviceDisplayName}</div>
-                        </div>
-                        <div class="field">
-                            <div class="label">Additional Details:</div>
-                            <div class="value">${message || 'No additional details provided.'}</div>
-                        </div>
+                    <div class="field">
+                        <div class="label">Company:</div>
+                        <div class="value">${company}</div>
                     </div>
-                    <div class="footer">
-                        <p>This email was automatically generated from the Kyroshield website contact form.</p>
-                        <p>Timestamp: ${new Date().toLocaleString()}</p>
+                    <div class="field">
+                        <div class="label">Email:</div>
+                        <div class="value"><a href="mailto:${email}">${email}</a></div>
+                    </div>
+                    <div class="field">
+                        <div class="label">Phone:</div>
+                        <div class="value"><a href="tel:${phone}">${phone}</a></div>
+                    </div>
+                    <div class="field">
+                        <div class="label">Service Interested In:</div>
+                        <div class="value"><strong>${serviceDisplayName}</strong></div>
+                    </div>
+                    
+                    ${message ? `
+                    <div class="message-box">
+                        <div class="label">📝 Additional Details:</div>
+                        <div class="value">${message}</div>
+                    </div>
+                    ` : '<div class="field"><div class="label">📝 Additional Details:</div><div class="value"><em>No additional details provided.</em></div></div>'}
+                    
+                    <div class="field">
+                        <div class="label">Timestamp:</div>
+                        <div class="value">${new Date().toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' })}</div>
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <a href="mailto:${email}?subject=Re: Quote Request for ${serviceDisplayName}&body=Dear ${name},%0D%0A%0D%0AThank you for your inquiry about our ${serviceDisplayName} services.%0D%0A%0D%0AWe would like to discuss your requirements further.%0D%0A%0D%0ABest regards,%0D%0AThe Kyroshield Team" class="btn">
+                            📧 Reply to ${name}
+                        </a>
+                        <a href="https://www.kyroshield.com/admin" class="btn">
+                            📊 View in Dashboard
+                        </a>
                     </div>
                 </div>
-            </body>
-            </html>
+                <div class="footer">
+                    <p>This email was automatically generated from the Kyroshield website contact form.</p>
+                    <p>Lead ID: ${Date.now()}-${Math.random().toString(36).substr(2, 9)}</p>
+                </div>
+            </div>
+        </body>
+        </html>
         `;
 
         // Customer email HTML
         const customerHtml = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    body { font-family: 'Inter', Arial, sans-serif; line-height: 1.6; color: #333; }
-                    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                    .header { background-color: #000; color: white; padding: 30px; text-align: center; }
-                    .logo { font-family: 'Montserrat', sans-serif; font-size: 24px; font-weight: bold; }
-                    .logo-accent { color: #999; }
-                    .content { background-color: #f8f9fa; padding: 30px; border-radius: 8px; margin: 20px 0; }
-                    .thank-you { color: #000; font-size: 20px; margin-bottom: 20px; }
-                    .details { background-color: white; padding: 20px; border-radius: 4px; border-left: 4px solid #000; }
-                    .next-steps { margin-top: 30px; padding: 20px; background-color: #e9ecef; border-radius: 4px; }
-                    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #666; font-size: 14px; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <div class="logo">KYRO<span class="logo-accent">SHIELD</span></div>
-                        <p>Secure. Comply. Evolve.</p>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body { 
+                    font-family: 'Inter', 'Segoe UI', Arial, sans-serif; 
+                    line-height: 1.6; 
+                    color: #333333; 
+                    margin: 0; 
+                    padding: 0; 
+                    background-color: #f8f9fa; 
+                }
+                .container { 
+                    max-width: 600px; 
+                    margin: 0 auto; 
+                    background-color: #ffffff; 
+                }
+                .header { 
+                    background-color: #000000; 
+                    padding: 30px 20px; 
+                    text-align: center; 
+                }
+                .text-logo { 
+                    font-family: 'Montserrat', Arial, sans-serif; 
+                    font-size: 32px; 
+                    font-weight: bold; 
+                    color: white; 
+                    margin-bottom: 10px; 
+                    letter-spacing: 1px; 
+                }
+                .logo-accent { 
+                    color: #999999; 
+                }
+                .tagline { 
+                    color: #cccccc; 
+                    font-size: 14px; 
+                    letter-spacing: 1px; 
+                    margin: 0; 
+                    text-transform: uppercase; 
+                }
+                .content { 
+                    padding: 40px 30px; 
+                }
+                .thank-you { 
+                    color: #000000; 
+                    font-size: 24px; 
+                    font-weight: 600; 
+                    margin-bottom: 25px; 
+                    text-align: center; 
+                }
+                .greeting { 
+                    font-size: 16px; 
+                    margin-bottom: 25px; 
+                    color: #555555; 
+                }
+                .details-container { 
+                    background-color: #f8f9fa; 
+                    padding: 25px; 
+                    border-radius: 8px; 
+                    border-left: 4px solid #000000; 
+                    margin: 25px 0; 
+                }
+                .details-title { 
+                    font-size: 18px; 
+                    font-weight: 600; 
+                    margin-bottom: 20px; 
+                    color: #000000; 
+                }
+                .detail-item { 
+                    margin-bottom: 12px; 
+                    display: flex; 
+                }
+                .detail-label { 
+                    font-weight: 600; 
+                    color: #000000; 
+                    min-width: 140px; 
+                }
+                .detail-value { 
+                    color: #555555; 
+                    flex: 1; 
+                }
+                .message-box { 
+                    background-color: #fff3cd; 
+                    border: 1px solid #ffeaa7; 
+                    border-radius: 6px; 
+                    padding: 20px; 
+                    margin: 25px 0; 
+                }
+                .message-label { 
+                    font-weight: 600; 
+                    color: #856404; 
+                    margin-bottom: 10px; 
+                }
+                .message-content { 
+                    color: #856404; 
+                    line-height: 1.5; 
+                }
+                .next-steps { 
+                    background-color: #e8f4f8; 
+                    padding: 25px; 
+                    border-radius: 8px; 
+                    margin: 30px 0; 
+                }
+                .next-steps-title { 
+                    font-size: 18px; 
+                    font-weight: 600; 
+                    margin-bottom: 15px; 
+                    color: #0c5460; 
+                }
+                .steps-list { 
+                    margin: 0; 
+                    padding-left: 20px; 
+                }
+                .steps-list li { 
+                    margin-bottom: 10px; 
+                    color: #0c5460; 
+                }
+                .contact-box { 
+                    background-color: #000000; 
+                    color: #ffffff; 
+                    padding: 25px; 
+                    border-radius: 8px; 
+                    margin: 30px 0; 
+                }
+                .contact-title { 
+                    font-size: 18px; 
+                    font-weight: 600; 
+                    margin-bottom: 15px; 
+                    color: #ffffff; 
+                }
+                .contact-info { 
+                    line-height: 1.8; 
+                }
+                .footer { 
+                    background-color: #f1f1f1; 
+                    padding: 25px; 
+                    text-align: center; 
+                    font-size: 12px; 
+                    color: #666666; 
+                    border-top: 1px solid #dddddd; 
+                }
+                .footer-links { 
+                    margin: 15px 0; 
+                }
+                .footer-links a { 
+                    color: #000000; 
+                    text-decoration: none; 
+                    margin: 0 10px; 
+                }
+                .signature { 
+                    margin: 25px 0; 
+                    font-style: italic; 
+                    color: #555555; 
+                }
+                @media (max-width: 600px) {
+                    .content { padding: 25px 20px; }
+                    .detail-item { flex-direction: column; }
+                    .detail-label { min-width: auto; margin-bottom: 5px; }
+                    .text-logo { font-size: 28px; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <!-- Header with TEXT Logo -->
+                <div class="header">
+                    <div class="text-logo">KYRO<span class="logo-accent">SHIELD</span></div>
+                    <p class="tagline">Secure. Comply. Evolve.</p>
+                </div>
+                
+                <!-- Main Content -->
+                <div class="content">
+                    <h2 class="thank-you">Thank You for Contacting Kyroshield!</h2>
+                    
+                    <p class="greeting">Dear ${name},</p>
+                    
+                    <p>We have received your request for a quote regarding <strong>${serviceDisplayName}</strong> services. Our team will review your inquiry and contact you within 24 business hours.</p>
+                    
+                    <!-- Request Details -->
+                    <div class="details-container">
+                        <h3 class="details-title">📋 Your Request Details:</h3>
+                        <div class="detail-item">
+                            <span class="detail-label">Name:</span>
+                            <span class="detail-value">${name}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Company:</span>
+                            <span class="detail-value">${company}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Email:</span>
+                            <span class="detail-value">${email}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Phone:</span>
+                            <span class="detail-value">${phone}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Service:</span>
+                            <span class="detail-value">${serviceDisplayName}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Submitted:</span>
+                            <span class="detail-value">${new Date().toLocaleString('en-MY', { timeZone: 'Asia/Kuala_Lumpur' })}</span>
+                        </div>
                     </div>
                     
-                    <div class="content">
-                        <h2 class="thank-you">Thank You for Contacting Kyroshield!</h2>
-                        
-                        <p>Dear ${name},</p>
-                        
-                        <p>We have received your request for a quote regarding <strong>${serviceDisplayName}</strong> services. Our team will review your inquiry and contact you within 24 business hours.</p>
-                        
-                        <div class="details">
-                            <h3>Your Request Details:</h3>
-                            <p><strong>Name:</strong> ${name}</p>
-                            <p><strong>Company:</strong> ${company}</p>
-                            <p><strong>Service:</strong> ${serviceDisplayName}</p>
-                            <p><strong>Submitted:</strong> ${new Date().toLocaleString()}</p>
+                    <!-- Additional Message (if provided) -->
+                    ${message ? `
+                    <div class="message-box">
+                        <div class="message-label">📝 Your Additional Message:</div>
+                        <div class="message-content">${message}</div>
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Next Steps -->
+                    <div class="next-steps">
+                        <h3 class="next-steps-title">🔄 What Happens Next:</h3>
+                        <ol class="steps-list">
+                            <li>Our team reviews your requirements</li>
+                            <li>We prepare a customized quote based on your needs</li>
+                            <li>A specialist contacts you to discuss details</li>
+                            <li>We provide a comprehensive service proposal</li>
+                        </ol>
+                    </div>
+                    
+                    <!-- Contact Information -->
+                    <div class="contact-box">
+                        <h3 class="contact-title">📞 Contact Information</h3>
+                        <div class="contact-info">
+                            <p><strong>Email:</strong> contact@kyroshield.com</p>
+                            <p><strong>Phone:</strong> +60 013-456 6146</p>
+                            <p><strong>Address:</strong> Johor Bahru, Malaysia</p>
+                            <p><strong>Business Hours:</strong> Monday - Friday, 9:00 AM - 6:00 PM</p>
                         </div>
-                        
-                        <div class="next-steps">
-                            <h3>What Happens Next:</h3>
-                            <ol>
-                                <li>Our team will review your requirements</li>
-                                <li>We'll prepare a customized quote based on your needs</li>
-                                <li>A specialist will contact you to discuss the details</li>
-                                <li>We'll provide a comprehensive service proposal</li>
-                            </ol>
-                        </div>
-                        
-                        <p>If you have any urgent questions, feel free to contact us directly at <strong>+60 013-456 6146</strong>.</p>
-                        
+                    </div>
+                    
+                    <!-- Signature -->
+                    <div class="signature">
                         <p>Best regards,<br>
                         <strong>The Kyroshield Team</strong></p>
                     </div>
-                    
-                    <div class="footer">
-                        <p><strong>Kyroshield Headquarters</strong><br>
-                        Johor Bahru, Malaysia<br>
-                        Phone: +60 013-456 6146<br>
-                        Email: contact@kyroshield.com</p>
-                        
-                        <p>Business Hours: Monday - Friday, 9:00 AM - 6:00 PM</p>
-                        
-                        <p style="font-size: 12px; color: #999; margin-top: 20px;">
-                            This is an automated message. Please do not reply to this email.
-                        </p>
-                    </div>
                 </div>
-            </body>
-            </html>
+                
+                <!-- Footer -->
+                <div class="footer">
+                    <div class="footer-links">
+                        <a href="https://www.kyroshield.com">Website</a>
+                        <a href="https://www.kyroshield.com/services">Services</a>
+                        <a href="https://www.kyroshield.com/contact">Contact</a>
+                    </div>
+                    <p>© ${new Date().getFullYear()} Kyroshield. All rights reserved.</p>
+                    <p style="font-size: 11px; color: #999; margin-top: 15px;">
+                        This is an automated message. Please do not reply directly to this email.<br>
+                        For inquiries, email <a href="mailto:contact@kyroshield.com" style="color: #666;">contact@kyroshield.com</a>
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
         `;
 
         // Send both emails via SendGrid API
