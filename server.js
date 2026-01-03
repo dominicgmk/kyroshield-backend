@@ -17,20 +17,14 @@ const app = express();
 // Trust Railway's proxy for rate limiting
 app.set('trust proxy', 1);
 
-// Request ID and logging middleware
+// Request ID and logging middleware (SERVER SIDE ONLY - no browser output)
 app.use((req, res, next) => {
     const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2);
     req.requestId = requestId;
     req.startTime = Date.now();
     
-    console.log('\n=== NEW REQUEST ===');
-    console.log(`ID: ${requestId}`);
-    console.log(`Time: ${new Date().toISOString()}`);
-    console.log(`Method: ${req.method}`);
-    console.log(`Path: ${req.path}`);
-    console.log(`IP: ${req.ip}`);
-    console.log(`Origin: ${req.headers.origin || 'No origin'}`);
-    console.log(`User-Agent: ${req.headers['user-agent']?.substring(0, 80) || 'Unknown'}`);
+    // Server logs only - not sent to browser
+    console.log(`📥 [${requestId}] ${req.method} ${req.path} from ${req.ip}`);
     
     next();
 });
@@ -43,11 +37,6 @@ app.use((req, res, next) => {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     
-    // Content Security Policy for emails
-    if (req.path.includes('/api/send-email')) {
-        res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'unsafe-inline';");
-    }
-    
     next();
 });
 
@@ -55,11 +44,8 @@ app.use((req, res, next) => {
 const corsOptions = {
     origin: function(origin, callback) {
         if (!origin) {
-            console.log('📡 No origin header - allowing request');
             return callback(null, true);
         }
-        
-        console.log('🔍 Checking CORS for origin:', origin);
         
         const normalizedOrigin = origin.replace(/\/$/, '').toLowerCase();
         
@@ -68,44 +54,36 @@ const corsOptions = {
             'https://kyroshield.com',
             'http://localhost:5501',
             'http://127.0.0.1:5501',
-            'https://kyroshield-backend.up.railway.app',
-            'https://cloudflare.com',
-            'https://www.cloudflare.com'
+            'https://kyroshield-backend.up.railway.app'
         ].map(url => url.replace(/\/$/, '').toLowerCase());
         
         if (process.env.NODE_ENV === 'development') {
-            console.log('⚙️ Development mode - allowing all origins');
             return callback(null, true);
         }
         
         if (allowedOrigins.includes(normalizedOrigin)) {
-            console.log('✅ CORS allowed - exact match');
             return callback(null, true);
         }
         
         if (normalizedOrigin === 'https://www.kyroshield.com' || 
             normalizedOrigin === 'https://kyroshield.com') {
-            console.log('✅ CORS allowed - kyroshield.com variation');
             return callback(null, true);
         }
         
         if (normalizedOrigin.includes('localhost:5501') || 
             normalizedOrigin.includes('127.0.0.1:5501')) {
-            console.log('✅ CORS allowed - localhost variation');
             return callback(null, true);
         }
         
         if (normalizedOrigin.includes('railway.app')) {
-            console.log('✅ CORS allowed - railway.app domain');
             return callback(null, true);
         }
         
-        console.log('❌ CORS blocked - origin not in allowed list:', normalizedOrigin);
         return callback(new Error('CORS policy violation'), false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400
 };
 
@@ -113,22 +91,21 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 // Request size limits
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(express.json({ limit: '50kb' })); // Increased for HTML emails
+app.use(express.urlencoded({ extended: true, limit: '50kb' }));
 
 app.use((req, res, next) => {
     const contentLength = parseInt(req.headers['content-length'] || '0');
-    if (contentLength > 10240) {
+    if (contentLength > 51200) { // 50KB
         return res.status(413).json({
             success: false,
-            message: 'Request payload too large. Maximum size is 10KB.',
-            requestId: req.requestId
+            message: 'Request payload too large.'
         });
     }
     next();
 });
 
-// Response timing middleware - FIXED VERSION
+// Response timing middleware
 app.use((req, res, next) => {
     const start = Date.now();
     
@@ -137,15 +114,12 @@ app.use((req, res, next) => {
     
     res.end = function(...args) {
         const duration = Date.now() - start;
+        
+        // Log completion server-side only
+        console.log(`✅ [${req.requestId}] Completed in ${duration}ms`);
+        
+        // Add response time header (optional)
         res.setHeader('X-Response-Time', `${duration}ms`);
-        
-        // Log completion
-        console.log(`✅ Request ${req.requestId} completed in ${duration}ms`);
-        
-        // Log slow requests
-        if (duration > 1000) {
-            console.warn(`🐌 Slow request: ${req.method} ${req.path} took ${duration}ms`);
-        }
         
         // Call original end method
         return originalEnd.apply(res, args);
@@ -176,8 +150,7 @@ const ipLimiter = rateLimit({
     max: 100,
     message: {
         success: false,
-        message: 'Too many requests from this IP. Please try again later.',
-        requestId: null
+        message: 'Too many requests. Please try again later.'
     },
     standardHeaders: true,
     legacyHeaders: false,
@@ -190,8 +163,7 @@ const emailLimiter = rateLimit({
     max: 5,
     message: {
         success: false,
-        message: 'Too many requests from this email address. Please try again later.',
-        requestId: null
+        message: 'Too many requests from this email. Please try again later.'
     },
     skip: (req) => req.method === 'OPTIONS',
     keyGenerator: (req) => {
@@ -201,38 +173,9 @@ const emailLimiter = rateLimit({
 
 // ================ EMAIL FUNCTIONS ================
 
-const validateEmailContent = (content) => {
-    const issues = [];
-    
-    if (content.length > 50000) {
-        issues.push('Email content too long');
-    }
-    
-    const spamPhrases = [
-        'click here', 'buy now', 'limited time', 'act now',
-        'special promotion', 'risk free', 'winner', 'prize',
-        'dear friend', 'congratulations', 'guaranteed'
-    ];
-    
-    const contentLower = content.toLowerCase();
-    spamPhrases.forEach(phrase => {
-        if (contentLower.includes(phrase)) {
-            issues.push(`Contains potentially spammy phrase: "${phrase}"`);
-        }
-    });
-    
-    return issues;
-};
-
 const sendEmail = async (to, subject, html, text = null) => {
     try {
-        // Validate email content
-        const validationIssues = validateEmailContent(html);
-        if (validationIssues.length > 0) {
-            console.warn('⚠️ Email content warnings:', validationIssues);
-        }
-        
-        // Create better plain text version
+        // Create plain text version
         const plainText = text || html
             .replace(/<br\s*\/?>/gi, '\n')
             .replace(/<p>/gi, '\n')
@@ -256,14 +199,12 @@ const sendEmail = async (to, subject, html, text = null) => {
             text: plainText,
             headers: {
                 'X-Entity-Ref-ID': Date.now().toString(),
-                'X-Request-ID': Date.now().toString(36) + Math.random().toString(36).substr(2),
-                'List-Unsubscribe': '<mailto:contact@kyroshield.com?subject=Unsubscribe>',
-                'Precedence': 'bulk'
+                'List-Unsubscribe': '<mailto:contact@kyroshield.com?subject=Unsubscribe>'
             },
             categories: ['quote-request', 'kyroshield-website']
         };
         
-        console.log(`📤 Sending email to ${to}`);
+        console.log(`📧 Sending email to ${to}`);
         const result = await sgMail.send(msg);
         
         console.log(`✅ Email sent: ${result[0].headers['x-message-id']}`);
@@ -274,11 +215,7 @@ const sendEmail = async (to, subject, html, text = null) => {
         };
         
     } catch (error) {
-        console.error('❌ SendGrid error:', {
-            message: error.message,
-            code: error.code,
-            response: error.response?.body
-        });
+        console.error('❌ SendGrid error:', error.message);
         throw error;
     }
 };
@@ -292,37 +229,22 @@ app.get('/api/health', (req, res) => {
         message: 'Kyroshield Backend Server',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development',
-        nodeVersion: process.version,
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
         email: {
             configured: !!process.env.SENDGRID_API_KEY,
-            service: 'SendGrid API',
-            from: process.env.EMAIL_FROM || 'Not configured'
-        },
-        request: {
-            id: req.requestId,
-            origin: req.headers.origin || 'No origin header',
-            ip: req.ip,
-            method: req.method,
-            url: req.url
+            service: 'SendGrid API'
         }
     };
     
-    console.log('🏥 Health check requested:', healthData.request);
     res.json(healthData);
 });
 
 // SendGrid test endpoint
 app.get('/api/test-sendgrid', async (req, res) => {
     try {
-        console.log('🔧 Testing SendGrid connection...');
-        
         if (!process.env.SENDGRID_API_KEY) {
             return res.status(500).json({
                 success: false,
-                message: 'SendGrid API key not configured.',
-                requestId: req.requestId
+                message: 'Email service not configured.'
             });
         }
         
@@ -334,33 +256,19 @@ app.get('/api/test-sendgrid', async (req, res) => {
             html: '<p>Testing SendGrid connection</p>'
         });
         
-        console.log('✅ SendGrid connection verified');
-        
         res.json({
             success: true,
-            message: 'SendGrid connection successful',
-            config: {
-                service: 'SendGrid API',
-                from: process.env.EMAIL_FROM || 'Not configured',
-                apiKeyConfigured: !!process.env.SENDGRID_API_KEY
-            },
-            requestId: req.requestId
+            message: 'SendGrid connection successful'
         });
         
     } catch (error) {
-        console.error('❌ SendGrid test error:', error);
+        console.error('SendGrid test error:', error.message);
         
-        let errorMessage = 'SendGrid connection failed. ';
-        if (error.response?.body?.errors) {
-            errorMessage += error.response.body.errors.map(err => err.message).join(', ');
-        } else {
-            errorMessage += error.message;
-        }
+        let errorMessage = 'SendGrid connection failed.';
         
         res.status(500).json({
             success: false,
-            message: errorMessage,
-            requestId: req.requestId
+            message: errorMessage
         });
     }
 });
@@ -369,11 +277,7 @@ app.get('/api/test-sendgrid', async (req, res) => {
 app.get('/api/cors-test', (req, res) => {
     res.json({
         success: true,
-        message: 'CORS test endpoint',
-        origin: req.headers.origin || 'No origin header',
-        method: req.method,
-        timestamp: new Date().toISOString(),
-        requestId: req.requestId
+        message: 'CORS test endpoint'
     });
 });
 
@@ -385,50 +289,40 @@ app.post('/api/test-email', ipLimiter, async (req, res) => {
         if (!testEmail) {
             return res.status(400).json({
                 success: false,
-                message: 'Test email address is required',
-                requestId: req.requestId
+                message: 'Test email address is required'
             });
         }
 
         if (!process.env.SENDGRID_API_KEY) {
             return res.status(500).json({
                 success: false,
-                message: 'SendGrid API key not configured.',
-                requestId: req.requestId
+                message: 'Email service not configured.'
             });
         }
 
-        const html = `<p>This is a test email sent from your <strong>Kyroshield</strong> server via SendGrid API.</p>
-                      <p>Timestamp: ${new Date().toLocaleString()}</p>
-                      <p>If you received this, your SendGrid configuration is working correctly!</p>`;
+        const html = `<p>This is a test email from Kyroshield server.</p>
+                      <p>Timestamp: ${new Date().toLocaleString()}</p>`;
 
-        await sendEmail(testEmail, 'Test Email from Kyroshield Server', html);
+        await sendEmail(testEmail, 'Test Email from Kyroshield', html);
         
         res.status(200).json({
             success: true,
-            message: `Test email sent successfully to ${testEmail} via SendGrid API`,
-            requestId: req.requestId
+            message: `Test email sent successfully`
         });
 
     } catch (error) {
-        console.error('❌ Test email error:', error);
+        console.error('Test email error:', error.message);
         
-        let errorMessage = 'Failed to send test email. ';
-        if (error.response?.body?.errors) {
-            errorMessage += error.response.body.errors.map(err => err.message).join(', ');
-        } else {
-            errorMessage += error.message;
-        }
-
+        let errorMessage = 'Failed to send test email.';
+        
         res.status(500).json({
             success: false,
-            message: errorMessage,
-            requestId: req.requestId
+            message: errorMessage
         });
     }
 });
 
-// Email sending endpoint (for quote form) - KEEP YOUR ORIGINAL EMAIL TEMPLATES
+// Email sending endpoint (for quote form)
 app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
     try {
         // Sanitize ALL inputs
@@ -439,20 +333,13 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
         const service = sanitizeInput(req.body.service);
         const message = sanitizeInput(req.body.message);
 
-        console.log('📨 New quote request:', { 
-            requestId: req.requestId, 
-            name, 
-            company, 
-            email, 
-            service 
-        });
+        console.log(`📨 New quote request from ${name} at ${company}`);
 
         // Validation
         if (!name || !company || !email || !phone || !service) {
             return res.status(400).json({
                 success: false,
-                message: 'Please fill in all required fields.',
-                requestId: req.requestId
+                message: 'Please fill in all required fields.'
             });
         }
 
@@ -460,16 +347,14 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
         if (!emailRegex.test(email)) {
             return res.status(400).json({
                 success: false,
-                message: 'Please enter a valid email address.',
-                requestId: req.requestId
+                message: 'Please enter a valid email address.'
             });
         }
 
         if (!process.env.SENDGRID_API_KEY) {
             return res.status(500).json({
                 success: false,
-                message: 'Email service is currently unavailable. Please try again later.',
-                requestId: req.requestId
+                message: 'Email service is currently unavailable.'
             });
         }
 
@@ -484,7 +369,7 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
 
         const serviceDisplayName = serviceNames[service] || service;
 
-        // Admin email HTML (same as your original)
+        // Admin email HTML (your template)
         const adminHtml = `
         <!DOCTYPE html>
         <html>
@@ -565,15 +450,13 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                 </div>
                 <div class="footer">
                     <p>This email was automatically generated from the Kyroshield website contact form.</p>
-                    <p>Lead ID: ${Date.now()}-${Math.random().toString(36).substr(2, 9)}</p>
-                    <p>Request ID: ${req.requestId}</p>
                 </div>
             </div>
         </body>
         </html>
         `;
 
-        // Customer email HTML (same as your original)
+        // Customer email HTML (your template)
         const customerHtml = `
         <!DOCTYPE html>
         <html>
@@ -840,50 +723,33 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
         `;
 
         // Send both emails
-        const adminResult = await sendEmail(
+        await sendEmail(
             process.env.EMAIL_TO || 'contact@kyroshield.com',
             `New Quote Request: ${name} from ${company}`,
             adminHtml
         );
 
-        const customerResult = await sendEmail(
+        await sendEmail(
             email,
             'Thank You for Your Quote Request - Kyroshield',
             customerHtml
         );
 
-        console.log(`✅ Emails sent successfully`, {
-            requestId: req.requestId,
-            adminMessageId: adminResult.messageId,
-            customerMessageId: customerResult.messageId
-        });
+        console.log(`✅ Quote request processed: ${name} from ${company}`);
 
         res.status(200).json({
             success: true,
-            message: 'Thank you for your request! We have sent a confirmation email and will contact you within 24 hours.',
-            requestId: req.requestId
+            message: 'Thank you for your request! We have sent a confirmation email and will contact you within 24 hours.'
         });
 
     } catch (error) {
-        console.error('❌ Email sending error:', {
-            requestId: req.requestId,
-            error: error.message,
-            code: error.code,
-            response: error.response?.body
-        });
+        console.error('Email sending error:', error.message);
         
         let errorMessage = 'Failed to send email. Please try again later.';
         
-        if (error.response?.body?.errors) {
-            errorMessage = error.response.body.errors.map(err => err.message).join(', ');
-        } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNECTION') {
-            errorMessage = 'Email connection failed. Please try again later.';
-        }
-
         res.status(500).json({
             success: false,
-            message: errorMessage,
-            requestId: req.requestId
+            message: errorMessage
         });
     }
 });
@@ -892,46 +758,28 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
 
 // 404 handler
 app.use((req, res) => {
-    console.log(`❌ 404 Not Found: ${req.method} ${req.url}`);
     res.status(404).json({
         success: false,
-        message: 'Endpoint not found',
-        requestId: req.requestId
+        message: 'Endpoint not found'
     });
 });
 
 // Global error handler
 app.use((err, req, res, next) => {
-    console.error('🔥 ERROR:', {
-        timestamp: new Date().toISOString(),
-        requestId: req.requestId,
-        method: req.method,
-        path: req.path,
-        ip: req.ip,
-        error: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    console.error('Server error:', err.message);
     
     const isProduction = process.env.NODE_ENV === 'production';
     
     if (err.message && (err.message.includes('CORS') || err.message.includes('origin'))) {
         return res.status(403).json({
             success: false,
-            message: 'CORS Error: Request blocked due to security policy.',
-            requestId: req.requestId,
-            error: isProduction ? undefined : err.message
+            message: 'Request blocked due to security policy.'
         });
-    }
-    
-    // SendGrid specific errors
-    if (err.response?.body?.errors) {
-        console.error('SendGrid API Errors:', err.response.body.errors);
     }
     
     res.status(500).json({
         success: false,
         message: 'Internal server error',
-        requestId: req.requestId,
         error: isProduction ? undefined : err.message
     });
 });
@@ -965,16 +813,7 @@ const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📧 Email service ready (SendGrid API)`);
     console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔒 Security: Enhanced production mode`);
     console.log(`========================================\n`);
-    
-    const railwayUrl = process.env.RAILWAY_STATIC_URL || `http://localhost:${PORT}`;
-    console.log(`🔗 Important Endpoints:`);
-    console.log(`   Health Check: ${railwayUrl}/api/health`);
-    console.log(`   SendGrid Test: ${railwayUrl}/api/test-sendgrid`);
-    console.log(`   CORS Test: ${railwayUrl}/api/cors-test`);
-    console.log(`   Quote endpoint: POST ${railwayUrl}/api/send-email`);
-    console.log(`   Test email: POST ${railwayUrl}/api/test-email\n`);
 });
 
 // Handle shutdown signals
