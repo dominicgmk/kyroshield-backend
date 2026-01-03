@@ -204,7 +204,7 @@ const emailLimiter = rateLimit({
 const validateEmailContent = (content) => {
     const issues = [];
     
-    if (content.length > 10000) {
+    if (content.length > 50000) {
         issues.push('Email content too long');
     }
     
