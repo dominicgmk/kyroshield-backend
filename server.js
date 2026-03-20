@@ -91,7 +91,7 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 // Request size limits
-app.use(express.json({ limit: '50kb' })); // Increased for HTML emails
+app.use(express.json({ limit: '50kb' }));
 app.use(express.urlencoded({ extended: true, limit: '50kb' }));
 
 app.use((req, res, next) => {
@@ -109,19 +109,12 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
     const start = Date.now();
     
-    // Store original end method
     const originalEnd = res.end;
     
     res.end = function(...args) {
         const duration = Date.now() - start;
-        
-        // Log completion server-side only
         console.log(`✅ [${req.requestId}] Completed in ${duration}ms`);
-        
-        // Add response time header (optional)
         res.setHeader('X-Response-Time', `${duration}ms`);
-        
-        // Call original end method
         return originalEnd.apply(res, args);
     };
     
@@ -141,6 +134,31 @@ const sanitizeInput = (input) => {
         .replace(/\\/g, '&#x5C;')
         .replace(/`/g, '&#96;')
         .trim();
+};
+
+// ================ SPAM PROTECTION ================
+
+// Disposable/throwaway email domain blocklist
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+    'mailinator.com', 'tempmail.com', 'throwaway.email', 'guerrillamail.com',
+    'yopmail.com', 'sharklasers.com', 'guerrillamailblock.com', 'grr.la',
+    'guerrillamail.info', 'guerrillamail.biz', 'guerrillamail.de', 'guerrillamail.net',
+    'guerrillamail.org', 'spam4.me', 'trashmail.com', 'trashmail.me', 'trashmail.at',
+    'trashmail.io', 'dispostable.com', 'maildrop.cc', 'fakeinbox.com', 'tempinbox.com',
+    'getnada.com', 'discard.email', 'spamgourmet.com', 'spamgourmet.net',
+    'spamgourmet.org', 'tempr.email', 'trbvm.com', 'tmailinator.com',
+    'mailnull.com', 'spamspot.com', 'spamthisplease.com', 'getairmail.com',
+    'filzmail.com', 'throwam.com', 'spamfree24.org', 'mailexpire.com',
+    'mailfreeonline.com', 'spamgob.com', 'trashmail.net', 'trashmail.org',
+    'tempinbox.net', 'tempemail.net', 'mailtemporaire.com', 'jetable.fr.nf',
+    'nomail.xl.cx', 'nospam.ze.tc', 'speed.1s.fr', 'courriel.fr.nf',
+    'moncourrier.fr.nf', 'monemail.fr.nf', 'monmail.fr.nf'
+]);
+
+// Check if an email uses a disposable domain
+const isDisposableEmail = (email) => {
+    const domain = email.split('@')[1]?.toLowerCase();
+    return domain ? DISPOSABLE_EMAIL_DOMAINS.has(domain) : false;
 };
 
 // ================ RATE LIMITING ================
@@ -175,7 +193,6 @@ const emailLimiter = rateLimit({
 
 const sendEmail = async (to, subject, html, text = null) => {
     try {
-        // Create plain text version
         const plainText = text || html
             .replace(/<br\s*\/?>/gi, '\n')
             .replace(/<p>/gi, '\n')
@@ -263,12 +280,9 @@ app.get('/api/test-sendgrid', async (req, res) => {
         
     } catch (error) {
         console.error('SendGrid test error:', error.message);
-        
-        let errorMessage = 'SendGrid connection failed.';
-        
         res.status(500).json({
             success: false,
-            message: errorMessage
+            message: 'SendGrid connection failed.'
         });
     }
 });
@@ -307,17 +321,14 @@ app.post('/api/test-email', ipLimiter, async (req, res) => {
         
         res.status(200).json({
             success: true,
-            message: `Test email sent successfully`
+            message: 'Test email sent successfully'
         });
 
     } catch (error) {
         console.error('Test email error:', error.message);
-        
-        let errorMessage = 'Failed to send test email.';
-        
         res.status(500).json({
             success: false,
-            message: errorMessage
+            message: 'Failed to send test email.'
         });
     }
 });
@@ -332,10 +343,21 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
         const phone = sanitizeInput(req.body.phone);
         const service = sanitizeInput(req.body.service);
         const message = sanitizeInput(req.body.message);
+        const honeypot = req.body.website; // Hidden field — real users leave this blank
 
         console.log(`📨 New quote request from ${name} at ${company}`);
 
-        // Validation
+        // ---- SPAM CHECK 1: Honeypot ----
+        // If this field has any value, it was filled by a bot — silently fake success
+        if (honeypot && honeypot.trim() !== '') {
+            console.warn(`🤖 Bot detected via honeypot from IP: ${req.ip}`);
+            return res.status(200).json({
+                success: true,
+                message: 'Thank you for your request! We will contact you within 24 hours.'
+            });
+        }
+
+        // ---- REQUIRED FIELDS ----
         if (!name || !company || !email || !phone || !service) {
             return res.status(400).json({
                 success: false,
@@ -343,11 +365,22 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
             });
         }
 
+        // ---- EMAIL FORMAT ----
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             return res.status(400).json({
                 success: false,
                 message: 'Please enter a valid email address.'
+            });
+        }
+
+        // ---- SPAM CHECK 2: Disposable email blocker ----
+        // B2B clients never use throwaway emails — block them
+        if (isDisposableEmail(email)) {
+            console.warn(`🚫 Disposable email blocked: ${email} from IP: ${req.ip}`);
+            return res.status(400).json({
+                success: false,
+                message: 'Please use a valid business or personal email address.'
             });
         }
 
@@ -369,7 +402,7 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
 
         const serviceDisplayName = serviceNames[service] || service;
 
-        // Admin email HTML (your template)
+        // Admin email HTML
         const adminHtml = `
         <!DOCTYPE html>
         <html>
@@ -456,7 +489,7 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
         </html>
         `;
 
-        // Customer email HTML (your template)
+        // Customer confirmation email HTML
         const customerHtml = `
         <!DOCTYPE html>
         <html>
@@ -490,9 +523,7 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     margin-bottom: 10px; 
                     letter-spacing: 1px; 
                 }
-                .logo-accent { 
-                    color: #999999; 
-                }
+                .logo-accent { color: #999999; }
                 .tagline { 
                     color: #cccccc; 
                     font-size: 14px; 
@@ -500,9 +531,7 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     margin: 0; 
                     text-transform: uppercase; 
                 }
-                .content { 
-                    padding: 40px 30px; 
-                }
+                .content { padding: 40px 30px; }
                 .thank-you { 
                     color: #000000; 
                     font-size: 24px; 
@@ -510,11 +539,7 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     margin-bottom: 25px; 
                     text-align: center; 
                 }
-                .greeting { 
-                    font-size: 16px; 
-                    margin-bottom: 25px; 
-                    color: #555555; 
-                }
+                .greeting { font-size: 16px; margin-bottom: 25px; color: #555555; }
                 .details-container { 
                     background-color: #f8f9fa; 
                     padding: 25px; 
@@ -522,25 +547,10 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     border-left: 4px solid #000000; 
                     margin: 25px 0; 
                 }
-                .details-title { 
-                    font-size: 18px; 
-                    font-weight: 600; 
-                    margin-bottom: 20px; 
-                    color: #000000; 
-                }
-                .detail-item { 
-                    margin-bottom: 12px; 
-                    display: flex; 
-                }
-                .detail-label { 
-                    font-weight: 600; 
-                    color: #000000; 
-                    min-width: 140px; 
-                }
-                .detail-value { 
-                    color: #555555; 
-                    flex: 1; 
-                }
+                .details-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #000000; }
+                .detail-item { margin-bottom: 12px; display: flex; }
+                .detail-label { font-weight: 600; color: #000000; min-width: 140px; }
+                .detail-value { color: #555555; flex: 1; }
                 .message-box { 
                     background-color: #fff3cd; 
                     border: 1px solid #ffeaa7; 
@@ -548,35 +558,17 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     padding: 20px; 
                     margin: 25px 0; 
                 }
-                .message-label { 
-                    font-weight: 600; 
-                    color: #856404; 
-                    margin-bottom: 10px; 
-                }
-                .message-content { 
-                    color: #856404; 
-                    line-height: 1.5; 
-                }
+                .message-label { font-weight: 600; color: #856404; margin-bottom: 10px; }
+                .message-content { color: #856404; line-height: 1.5; }
                 .next-steps { 
                     background-color: #e8f4f8; 
                     padding: 25px; 
                     border-radius: 8px; 
                     margin: 30px 0; 
                 }
-                .next-steps-title { 
-                    font-size: 18px; 
-                    font-weight: 600; 
-                    margin-bottom: 15px; 
-                    color: #0c5460; 
-                }
-                .steps-list { 
-                    margin: 0; 
-                    padding-left: 20px; 
-                }
-                .steps-list li { 
-                    margin-bottom: 10px; 
-                    color: #0c5460; 
-                }
+                .next-steps-title { font-size: 18px; font-weight: 600; margin-bottom: 15px; color: #0c5460; }
+                .steps-list { margin: 0; padding-left: 20px; }
+                .steps-list li { margin-bottom: 10px; color: #0c5460; }
                 .contact-box { 
                     background-color: #000000; 
                     color: #ffffff; 
@@ -584,15 +576,8 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     border-radius: 8px; 
                     margin: 30px 0; 
                 }
-                .contact-title { 
-                    font-size: 18px; 
-                    font-weight: 600; 
-                    margin-bottom: 15px; 
-                    color: #ffffff; 
-                }
-                .contact-info { 
-                    line-height: 1.8; 
-                }
+                .contact-title { font-size: 18px; font-weight: 600; margin-bottom: 15px; color: #ffffff; }
+                .contact-info { line-height: 1.8; }
                 .footer { 
                     background-color: #f1f1f1; 
                     padding: 25px; 
@@ -601,19 +586,9 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     color: #666666; 
                     border-top: 1px solid #dddddd; 
                 }
-                .footer-links { 
-                    margin: 15px 0; 
-                }
-                .footer-links a { 
-                    color: #000000; 
-                    text-decoration: none; 
-                    margin: 0 10px; 
-                }
-                .signature { 
-                    margin: 25px 0; 
-                    font-style: italic; 
-                    color: #555555; 
-                }
+                .footer-links { margin: 15px 0; }
+                .footer-links a { color: #000000; text-decoration: none; margin: 0 10px; }
+                .signature { margin: 25px 0; font-style: italic; color: #555555; }
                 @media (max-width: 600px) {
                     .content { padding: 25px 20px; }
                     .detail-item { flex-direction: column; }
@@ -624,13 +599,11 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
         </head>
         <body>
             <div class="container">
-                <!-- Header with TEXT Logo -->
                 <div class="header">
                     <div class="text-logo">KYRO<span class="logo-accent">SHIELD</span></div>
                     <p class="tagline">Secure. Comply. Evolve.</p>
                 </div>
                 
-                <!-- Main Content -->
                 <div class="content">
                     <h2 class="thank-you">Thank You for Contacting Kyroshield!</h2>
                     
@@ -638,7 +611,6 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     
                     <p>We have received your request for a quote regarding <strong>${serviceDisplayName}</strong> services. Our team will review your inquiry and contact you within 24 business hours.</p>
                     
-                    <!-- Request Details -->
                     <div class="details-container">
                         <h3 class="details-title">📋 Your Request Details:</h3>
                         <div class="detail-item">
@@ -667,7 +639,6 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                         </div>
                     </div>
                     
-                    <!-- Additional Message (if provided) -->
                     ${message ? `
                     <div class="message-box">
                         <div class="message-label">📝 Your Additional Message:</div>
@@ -675,7 +646,6 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                     </div>
                     ` : ''}
                     
-                    <!-- Next Steps -->
                     <div class="next-steps">
                         <h3 class="next-steps-title">🔄 What Happens Next:</h3>
                         <ol class="steps-list">
@@ -686,7 +656,6 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                         </ol>
                     </div>
                     
-                    <!-- Contact Information -->
                     <div class="contact-box">
                         <h3 class="contact-title">📞 Contact Information</h3>
                         <div class="contact-info">
@@ -697,14 +666,12 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
                         </div>
                     </div>
                     
-                    <!-- Signature -->
                     <div class="signature">
                         <p>Best regards,<br>
                         <strong>The Kyroshield Team</strong></p>
                     </div>
                 </div>
                 
-                <!-- Footer -->
                 <div class="footer">
                     <div class="footer-links">
                         <a href="https://www.kyroshield.com">Website</a>
@@ -744,12 +711,9 @@ app.post('/api/send-email', ipLimiter, emailLimiter, async (req, res) => {
 
     } catch (error) {
         console.error('Email sending error:', error.message);
-        
-        let errorMessage = 'Failed to send email. Please try again later.';
-        
         res.status(500).json({
             success: false,
-            message: errorMessage
+            message: 'Failed to send email. Please try again later.'
         });
     }
 });
@@ -788,7 +752,6 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Graceful shutdown handlers
 const shutdown = (signal) => {
     console.log(`\n⚠️ Received ${signal}. Shutting down gracefully...`);
     
@@ -798,7 +761,6 @@ const shutdown = (signal) => {
             process.exit(0);
         });
         
-        // Force shutdown after 10 seconds
         setTimeout(() => {
             console.error('⚠️ Could not close connections in time, forcing shutdown');
             process.exit(1);
@@ -813,14 +775,13 @@ const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📧 Email service ready (SendGrid API)`);
     console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🛡️  Spam protection: honeypot + disposable email blocker active`);
     console.log(`========================================\n`);
 });
 
-// Handle shutdown signals
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-// Handle uncaught errors
 process.on('uncaughtException', (error) => {
     console.error('💥 UNCAUGHT EXCEPTION:', error);
     shutdown('UNCAUGHT_EXCEPTION');
