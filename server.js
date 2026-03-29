@@ -205,34 +205,30 @@ const sendEmail = async (to, subject, html, text = null) => {
             .replace(/\s+/g, ' ')
             .trim();
         
+        // FIXED: from must be a STRING, not an object
         const msg = {
-            to,
-            from: {
-                email: process.env.EMAIL_FROM || 'contact@kyroshield.com',
-                name: 'Kyroshield'
-            },
+            to: to,
+            from: process.env.EMAIL_FROM || 'contact@kyroshield.com',
             subject: subject.substring(0, 78),
-            html,
+            html: html,
             text: plainText,
-            headers: {
-                'X-Entity-Ref-ID': Date.now().toString(),
-                'List-Unsubscribe': '<mailto:contact@kyroshield.com?subject=Unsubscribe>'
-            },
-            categories: ['quote-request', 'kyroshield-website']
         };
         
-        console.log(`📧 Sending email to ${to}`);
-        const result = await sgMail.send(msg);
+        console.log(`📧 Sending email to ${to} from ${process.env.EMAIL_FROM}`);
+        const response = await sgMail.send(msg);
         
-        console.log(`✅ Email sent: ${result[0].headers['x-message-id']}`);
-        return { 
-            success: true, 
-            messageId: result[0].headers['x-message-id'],
-            statusCode: result[0].statusCode
-        };
+        console.log(`✅ Email sent successfully`);
+        return { success: true };
         
     } catch (error) {
-        console.error('❌ SendGrid error:', error.message);
+        console.error('❌ SendGrid error details:');
+        console.error('   Message:', error.message);
+        
+        if (error.response) {
+            console.error('   Status Code:', error.response.statusCode);
+            console.error('   Response Body:', JSON.stringify(error.response.body, null, 2));
+        }
+        
         throw error;
     }
 };
@@ -331,6 +327,17 @@ app.post('/api/test-email', ipLimiter, async (req, res) => {
             message: 'Failed to send test email.'
         });
     }
+});
+
+// Diagnostic endpoint to check environment
+app.get('/api/diagnose', (req, res) => {
+    res.json({
+        sendgrid_configured: !!process.env.SENDGRID_API_KEY,
+        email_from: process.env.EMAIL_FROM,
+        email_to: process.env.EMAIL_TO,
+        node_env: process.env.NODE_ENV,
+        api_key_prefix: process.env.SENDGRID_API_KEY ? process.env.SENDGRID_API_KEY.substring(0, 7) : 'none'
+    });
 });
 
 // Email sending endpoint (for quote form)
